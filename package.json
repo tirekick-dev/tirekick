@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "Kick the tires on MCP servers and agent skills: schema validation, strict-regex lint, and quality checks before you ship or install.",
   "license": "MIT",
+  "homepage": "https://tirekick.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tirekick-dev/tirekick.git"
+  },
   "type": "module",
   "bin": {
     "tirekick": "dist/index.js"
