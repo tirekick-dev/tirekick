@@ -16,6 +16,7 @@ npx tirekick check ./tools.json
 
 - `--json` — machine-readable report
 - `--env KEY=VALUE` — environment for npm-package servers that need credentials to boot
+- `--header "Name: value"` — request headers for auth-gated remote servers (repeatable); credentials go directly from your machine to the server under test
 
 ## What it checks
 

@@ -33,9 +33,11 @@ async function listAll(client: Client): Promise<ToolShape[]> {
   return tools;
 }
 
-export async function fromUrl(url: string): Promise<ConnectResult> {
+export async function fromUrl(url: string, headers?: Record<string, string>): Promise<ConnectResult> {
   const client = new Client(CLIENT_INFO);
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: headers ? { headers } : undefined,
+  });
   try {
     await withTimeout(client.connect(transport), "initialize");
     const tools = await listAll(client);

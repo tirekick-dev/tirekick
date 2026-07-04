@@ -5,12 +5,16 @@ import { validateTools, type Report } from "./validate.js";
 const USAGE = `tirekick — kick the tires on an MCP server before you ship or install it
 
 Usage:
-  tirekick check <target> [--json] [--env KEY=VALUE ...]
+  tirekick check <target> [--json] [--env KEY=VALUE ...] [--header "Name: value" ...]
 
 Targets:
   https://host/mcp        remote server (streamable HTTP)
   some-package            npm package, run via npx over stdio
   ./tools.json            a saved tools/list response or tools array
+
+Auth-gated remotes: pass your own credentials with --header; they go
+directly from your machine to that server and nowhere else:
+  tirekick check https://host/mcp --header "Authorization: Bearer <token>"
 
 Checks:
   - every input/output schema validates against JSON Schema draft 2020-12
@@ -50,22 +54,31 @@ async function main() {
   const target = args[1];
   const asJson = args.includes("--json");
   const env: Record<string, string> = {};
+  const headers: Record<string, string> = {};
   for (let i = 2; i < args.length; i++) {
     if (args[i] === "--env" && args[i + 1]?.includes("=")) {
       const [k, ...rest] = args[++i].split("=");
       env[k] = rest.join("=");
+    } else if (args[i] === "--header" && args[i + 1]?.includes(":")) {
+      const [name, ...rest] = args[++i].split(":");
+      headers[name.trim()] = rest.join(":").trim();
     }
   }
 
   const kind = pickTarget(target);
   const result: ConnectResult =
-    kind === "url" ? await fromUrl(target) : kind === "file" ? await fromFile(target) : await fromNpm(target, env);
+    kind === "url"
+      ? await fromUrl(target, Object.keys(headers).length ? headers : undefined)
+      : kind === "file"
+        ? await fromFile(target)
+        : await fromNpm(target, env);
 
   if (!result.tools) {
     if (result.authGated) {
       console.error(
         `Could not scan ${target}: the server requires credentials before listing tools.\n` +
-          `For npm servers, pass them with --env KEY=VALUE. For OAuth remotes, scan is not yet supported.` +
+          `Remote servers: pass your own token with --header "Authorization: Bearer <token>".\n` +
+          `npm servers: pass credentials with --env KEY=VALUE.` +
           (result.bootError ? `\n\n${result.bootError}` : ""),
       );
     } else {
