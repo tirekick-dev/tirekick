@@ -77,17 +77,26 @@ export function validateTools(tools: ToolShape[]): Report {
     ] as const) {
       if (schema === undefined) continue;
 
-      // Draft 2020-12 conformance: ajv validates the schema against the
-      // meta-schema at compile time, which is the same bar the Claude API
-      // applies to input_schema.
+      // Structural validity: can this compile as a JSON Schema at all? The
+      // `$schema`/`$id` keywords are STRIPPED first — a server declaring an
+      // older draft (draft-07 is the ecosystem's most common choice, and
+      // what the MCP TypeScript SDK's zod-to-json-schema emits) is not a
+      // defect: Claude and every MCP client accept it. Compiling with the
+      // draft reference intact would make Ajv-2020 throw "no schema with
+      // key or ref .../draft-07/schema#" on every tool — a pure false
+      // positive that failed otherwise-clean servers. What we still catch
+      // here is genuine malformation (a schema no validator can compile).
+      const stripped = structuredClone(schema) as Record<string, unknown>;
+      delete stripped.$schema;
+      delete stripped.$id;
       try {
-        ajv.compile(structuredClone(schema) as object);
+        ajv.compile(stripped);
       } catch (e) {
         findings.push({
           severity: "error",
           tool: tool.name,
           where: field,
-          rule: "schema-2020-12",
+          rule: "schema-invalid",
           message: (e as Error).message,
         });
       }
