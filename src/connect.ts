@@ -15,6 +15,21 @@ export interface ConnectResult {
 const CLIENT_INFO = { name: "tirekick", version: "0.0.1" };
 const TIMEOUT_MS = 20_000;
 
+/** Minimal fetch shape the MCP transport accepts (SDK's FetchLike). */
+export type FetchLike = (url: string | URL, init?: RequestInit) => Promise<Response>;
+
+export interface FromUrlOptions {
+  headers?: Record<string, string>;
+  /**
+   * Custom fetch for the transport's HTTP calls. Callers that reach servers
+   * from user input (the hosted checker) MUST pass an SSRF-guarded fetch so
+   * redirects and DNS resolution can't be steered into a private network.
+   * The CLI, which runs on the user's own machine against a URL they typed,
+   * can omit it.
+   */
+  fetch?: FetchLike;
+}
+
 function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
   return Promise.race([
     p,
@@ -33,10 +48,11 @@ async function listAll(client: Client): Promise<ToolShape[]> {
   return tools;
 }
 
-export async function fromUrl(url: string, headers?: Record<string, string>): Promise<ConnectResult> {
+export async function fromUrl(url: string, opts: FromUrlOptions = {}): Promise<ConnectResult> {
   const client = new Client(CLIENT_INFO);
   const transport = new StreamableHTTPClientTransport(new URL(url), {
-    requestInit: headers ? { headers } : undefined,
+    requestInit: opts.headers ? { headers: opts.headers } : undefined,
+    fetch: opts.fetch,
   });
   try {
     await withTimeout(client.connect(transport), "initialize");

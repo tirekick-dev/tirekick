@@ -68,7 +68,7 @@ async function main() {
   const kind = pickTarget(target);
   const result: ConnectResult =
     kind === "url"
-      ? await fromUrl(target, Object.keys(headers).length ? headers : undefined)
+      ? await fromUrl(target, { headers: Object.keys(headers).length ? headers : undefined })
       : kind === "file"
         ? await fromFile(target)
         : await fromNpm(target, env);
