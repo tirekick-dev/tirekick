@@ -76,6 +76,9 @@ export const CURVE = {
   warnAllowanceRatio: 0.2,
   /** Descriptions under `warnBelow` chars warn; under `infoBelow` are informational. */
   description: { warnBelow: 20, infoBelow: 40 },
+  /** Tool counts above this get an informational bloat finding: every tool
+   * definition is loaded into the agent's context before the first message. */
+  toolCountInfoAbove: 60,
 } as const;
 
 /**
@@ -268,6 +271,17 @@ export function validateTools(tools: ToolShape[]): Report {
         message: "tool declares no input schema",
       });
     }
+  }
+
+  if (tools.length > CURVE.toolCountInfoAbove) {
+    findings.push({
+      severity: "info",
+      category: "ergonomics",
+      tool: "(server)",
+      where: "tools/list",
+      rule: "tool-count",
+      message: `server exposes ${tools.length} tools; every definition is loaded into the agent's context, and oversized toolsets degrade tool selection`,
+    });
   }
 
   const categories = Object.fromEntries(

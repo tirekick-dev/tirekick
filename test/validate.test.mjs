@@ -242,6 +242,15 @@ test("patternProperties keys are linted as regexes", () => {
   assert.equal(report.findings.filter((f) => f.rule === "strict-regex").length, 1);
 });
 
+// Tool-count bloat is informational: visible, never grade-moving.
+test("oversized toolsets get an info finding that doesn't move the grade", () => {
+  const tools = Array.from({ length: 61 }, (_, i) => cleanTool(`tool.${i}`));
+  const report = validateTools(tools);
+  const finding = report.findings.find((f) => f.rule === "tool-count");
+  assert.equal(finding?.severity, "info");
+  assert.equal(report.grade, "A");
+});
+
 test("toolFindings rolls up per tool, only tools with findings", () => {
   const report = validateTools([
     {
