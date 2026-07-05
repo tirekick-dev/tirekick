@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { fromFile, fromNpm, fromUrl, type ConnectResult } from "./connect.js";
-import { validateTools, type Report } from "./validate.js";
+import { validateTools, CATEGORIES, type Report } from "./validate.js";
 
 const USAGE = `tirekick — kick the tires on an MCP server before you ship or install it
 
 Usage:
-  tirekick check <target> [--json] [--env KEY=VALUE ...] [--header "Name: value" ...]
+  tirekick <target> [--json] [--env KEY=VALUE ...] [--header "Name: value" ...]
+  tirekick check <target> [...]     same thing, spelled out
 
 Targets:
   https://host/mcp        remote server (streamable HTTP)
@@ -14,9 +15,9 @@ Targets:
 
 Auth-gated remotes: pass your own credentials with --header; they go
 directly from your machine to that server and nowhere else:
-  tirekick check https://host/mcp --header "Authorization: Bearer <token>"
+  tirekick https://host/mcp --header "Authorization: Bearer <token>"
 
-Checks:
+Checks (graded per category — interop, agent ergonomics, safety):
   - every input/output schema validates against JSON Schema draft 2020-12
   - regex patterns are safe for strict engines (no lookaround, backrefs,
     or unescaped '[' in character classes — the stuff that gets a whole
@@ -31,14 +32,17 @@ function pickTarget(target: string) {
   return "npm" as const;
 }
 
+const SEVERITY_MARK = { error: "✖", warn: "▲", info: "·" } as const;
+
 function render(report: Report, source: string): string {
   const lines: string[] = [];
   const errors = report.findings.filter((f) => f.severity === "error");
   const warns = report.findings.filter((f) => f.severity === "warn");
   lines.push(`tirekick report — ${source}`);
   lines.push(`tools: ${report.tools}   errors: ${errors.length}   warnings: ${warns.length}   grade: ${report.grade}`);
+  lines.push(CATEGORIES.map((c) => `${c}: ${report.categories[c].grade}`).join("   "));
   for (const f of report.findings) {
-    lines.push(`  ${f.severity === "error" ? "✖" : "▲"} [${f.rule}] ${f.tool} → ${f.where}`);
+    lines.push(`  ${SEVERITY_MARK[f.severity]} [${f.rule}] ${f.tool} → ${f.where}`);
     lines.push(`     ${f.message.split("\n")[0]}`);
   }
   if (report.findings.length === 0) lines.push("  ✓ no findings — schemas are clean");
@@ -47,15 +51,17 @@ function render(report: Report, source: string): string {
 
 async function main() {
   const args = process.argv.slice(2);
-  if (args[0] !== "check" || !args[1] || args.includes("--help")) {
+  // `tirekick <target>` and `tirekick check <target>` are the same command.
+  if (args[0] === "check") args.shift();
+  const target = args[0];
+  if (!target || target.startsWith("-") || args.includes("--help")) {
     console.log(USAGE);
     process.exit(args.includes("--help") ? 0 : 2);
   }
-  const target = args[1];
   const asJson = args.includes("--json");
   const env: Record<string, string> = {};
   const headers: Record<string, string> = {};
-  for (let i = 2; i < args.length; i++) {
+  for (let i = 1; i < args.length; i++) {
     if (args[i] === "--env" && args[i + 1]?.includes("=")) {
       const [k, ...rest] = args[++i].split("=");
       env[k] = rest.join("=");

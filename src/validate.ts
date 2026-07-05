@@ -1,9 +1,23 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { VERSION } from "./version.js";
 
-export type Severity = "error" | "warn";
+export type Severity = "error" | "warn" | "info";
+export type Grade = "A" | "B" | "C" | "D" | "F";
+
+/**
+ * Every rule belongs to exactly one scoring category:
+ * - `interop`: will a strict client/API reject this tool list outright?
+ * - `ergonomics`: can an agent use these tools well (descriptions, schemas)?
+ * - `safety`: signals that tool metadata may manipulate the agent (reserved;
+ *   rules land here as they ship).
+ */
+export type Category = "interop" | "ergonomics" | "safety";
+
+export const CATEGORIES: readonly Category[] = ["interop", "ergonomics", "safety"] as const;
 
 export interface Finding {
   severity: Severity;
+  category: Category;
   tool: string;
   where: string;
   rule: string;
@@ -17,11 +31,52 @@ export interface ToolShape {
   outputSchema?: unknown;
 }
 
-export interface Report {
-  tools: number;
-  findings: Finding[];
-  grade: "A" | "B" | "C" | "D" | "F";
+export interface CategoryScore {
+  grade: Grade;
+  /** Distinct (tool, rule) pairs per severity — one buggy helper reused
+   * across a tool's schema counts once, not once per occurrence. */
+  errors: number;
+  warns: number;
+  infos: number;
 }
+
+export interface ToolFindingSummary {
+  name: string;
+  errors: number;
+  warns: number;
+  infos: number;
+}
+
+export interface Report {
+  formatVersion: 2;
+  /** Version of the validator that produced this report. */
+  validator: string;
+  tools: number;
+  grade: Grade;
+  categories: Record<Category, CategoryScore>;
+  findings: Finding[];
+  /** Per-tool rollup; only tools with at least one finding appear. */
+  toolFindings: ToolFindingSummary[];
+}
+
+/**
+ * The grade curve, published verbatim on tirekick.dev/about. Grades are
+ * computed per category from deduplicated (tool, rule) units, and the
+ * overall grade is the worst category grade:
+ * - any error in a category caps that category at D
+ * - errors touching >= `errorShareForF` of tools make it an F
+ * - zero errors and zero warnings is an A
+ * - warn units up to max(warnAllowanceMin, tools * warnAllowanceRatio) is a
+ *   B, more is a C
+ * - info findings never move a grade (new checks ship as info first)
+ */
+export const CURVE = {
+  errorShareForF: 0.25,
+  warnAllowanceMin: 2,
+  warnAllowanceRatio: 0.2,
+  /** Descriptions under `warnBelow` chars warn; under `infoBelow` are informational. */
+  description: { warnBelow: 20, infoBelow: 40 },
+} as const;
 
 /**
  * Regex constructs that are valid ECMA-262 but rejected by the stricter
@@ -57,13 +112,57 @@ function lintPattern(pattern: string): string[] {
   return [...new Set(issues)];
 }
 
-function* walkPatterns(node: unknown, path: string): Generator<[string, string]> {
+/** Keys whose subtree is data, not schema: a "pattern" property inside an
+ * example value is a string someone stored, not a regex a client compiles. */
+const DATA_KEYS = new Set(["examples", "default", "const", "enum"]);
+
+/** Keys whose value is a name → schema map. The child KEYS there are
+ * arbitrary names — a property may legitimately be called "default" or
+ * "enum" — so data-key skipping and pattern detection must not apply at
+ * that level, only one level further down inside the schemas themselves. */
+const NAME_MAP_KEYS = new Set(["properties", "patternProperties", "$defs", "definitions"]);
+
+function* walkPatterns(node: unknown, path: string, inNameMap = false): Generator<[string, string]> {
   if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-      if (key === "pattern" && typeof value === "string") yield [`${path}.pattern`, value];
-      yield* walkPatterns(value, `${path}.${key}`);
+      if (!inNameMap) {
+        if (DATA_KEYS.has(key)) continue;
+        if (key === "pattern" && typeof value === "string") yield [`${path}.pattern`, value];
+        // patternProperties keys are themselves regexes that strict engines
+        // compile — lint them like any other pattern.
+        if (key === "patternProperties" && value && typeof value === "object") {
+          for (const propPattern of Object.keys(value as Record<string, unknown>)) {
+            yield [`${path}.patternProperties[${JSON.stringify(propPattern)}]`, propPattern];
+          }
+        }
+      }
+      yield* walkPatterns(value, `${path}.${key}`, !inNameMap && NAME_MAP_KEYS.has(key));
     }
   }
+}
+
+const GRADE_RANK: Record<Grade, number> = { A: 0, B: 1, C: 2, D: 3, F: 4 };
+
+function gradeCategory(findings: Finding[], toolCount: number): CategoryScore {
+  const units: Record<Severity, Set<string>> = { error: new Set(), warn: new Set(), info: new Set() };
+  const errorTools = new Set<string>();
+  for (const f of findings) {
+    units[f.severity].add(`${f.tool}\u0000${f.rule}`);
+    if (f.severity === "error") errorTools.add(f.tool);
+  }
+  const errors = units.error.size;
+  const warns = units.warn.size;
+  const infos = units.info.size;
+
+  let grade: Grade;
+  if (errors > 0) {
+    grade = errorTools.size / Math.max(toolCount, 1) >= CURVE.errorShareForF ? "F" : "D";
+  } else if (warns === 0) {
+    grade = "A";
+  } else {
+    grade = warns <= Math.max(CURVE.warnAllowanceMin, toolCount * CURVE.warnAllowanceRatio) ? "B" : "C";
+  }
+  return { grade, errors, warns, infos };
 }
 
 export function validateTools(tools: ToolShape[]): Report {
@@ -94,6 +193,7 @@ export function validateTools(tools: ToolShape[]): Report {
       } catch (e) {
         findings.push({
           severity: "error",
+          category: "interop",
           tool: tool.name,
           where: field,
           rule: "schema-invalid",
@@ -106,6 +206,7 @@ export function validateTools(tools: ToolShape[]): Report {
         if (root?.type !== "object") {
           findings.push({
             severity: "error",
+            category: "interop",
             tool: tool.name,
             where: field,
             rule: "root-type-object",
@@ -118,6 +219,7 @@ export function validateTools(tools: ToolShape[]): Report {
         for (const issue of lintPattern(pattern)) {
           findings.push({
             severity: "error",
+            category: "interop",
             tool: tool.name,
             where,
             rule: "strict-regex",
@@ -127,26 +229,39 @@ export function validateTools(tools: ToolShape[]): Report {
       }
     }
 
-    if (!tool.description || tool.description.trim().length === 0) {
+    const description = tool.description?.trim() ?? "";
+    if (description.length === 0) {
       findings.push({
         severity: "warn",
+        category: "ergonomics",
         tool: tool.name,
         where: "description",
         rule: "missing-description",
         message: "tool has no description; agents pick tools by description",
       });
-    } else if (tool.description.trim().length < 40) {
+    } else if (description.length < CURVE.description.warnBelow) {
       findings.push({
         severity: "warn",
+        category: "ergonomics",
         tool: tool.name,
         where: "description",
         rule: "thin-description",
-        message: `description is ${tool.description.trim().length} chars; too thin for reliable tool selection`,
+        message: `description is ${description.length} chars; too thin for reliable tool selection`,
+      });
+    } else if (description.length < CURVE.description.infoBelow) {
+      findings.push({
+        severity: "info",
+        category: "ergonomics",
+        tool: tool.name,
+        where: "description",
+        rule: "thin-description",
+        message: `description is ${description.length} chars; consider saying what the tool does and when to pick it`,
       });
     }
     if (tool.inputSchema === undefined) {
       findings.push({
         severity: "warn",
+        category: "ergonomics",
         tool: tool.name,
         where: "inputSchema",
         rule: "missing-input-schema",
@@ -155,9 +270,30 @@ export function validateTools(tools: ToolShape[]): Report {
     }
   }
 
-  const errors = findings.filter((f) => f.severity === "error").length;
-  const warns = findings.filter((f) => f.severity === "warn").length;
-  const grade = errors > 0 ? (errors >= 3 ? "F" : "D") : warns === 0 ? "A" : warns <= Math.max(2, tools.length * 0.2) ? "B" : "C";
+  const categories = Object.fromEntries(
+    CATEGORIES.map((c) => [c, gradeCategory(findings.filter((f) => f.category === c), tools.length)]),
+  ) as Record<Category, CategoryScore>;
 
-  return { tools: tools.length, findings, grade };
+  const grade = CATEGORIES.map((c) => categories[c].grade).reduce((worst, g) =>
+    GRADE_RANK[g] > GRADE_RANK[worst] ? g : worst,
+  );
+
+  const byTool = new Map<string, ToolFindingSummary>();
+  for (const f of findings) {
+    const t = byTool.get(f.tool) ?? { name: f.tool, errors: 0, warns: 0, infos: 0 };
+    if (f.severity === "error") t.errors++;
+    else if (f.severity === "warn") t.warns++;
+    else t.infos++;
+    byTool.set(f.tool, t);
+  }
+
+  return {
+    formatVersion: 2,
+    validator: VERSION,
+    tools: tools.length,
+    grade,
+    categories,
+    findings,
+    toolFindings: [...byTool.values()],
+  };
 }

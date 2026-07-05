@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { ToolShape } from "./validate.js";
+import { VERSION } from "./version.js";
 
 export interface ConnectResult {
   tools?: ToolShape[];
@@ -12,7 +13,7 @@ export interface ConnectResult {
   bootError?: string;
 }
 
-const CLIENT_INFO = { name: "tirekick", version: "0.0.1" };
+const CLIENT_INFO = { name: "tirekick", version: VERSION };
 const TIMEOUT_MS = 20_000;
 
 /** Minimal fetch shape the MCP transport accepts (SDK's FetchLike). */
@@ -37,6 +38,15 @@ function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
   ]);
 }
 
+/** Undici buries the useful part (ENOTFOUND, ECONNREFUSED) in error.cause and
+ * reports only "fetch failed" — surface the cause so reports stay diagnosable. */
+function errorMessage(e: unknown): string {
+  const err = e as Error & { cause?: { code?: string; message?: string } };
+  const cause = err?.cause;
+  const causeText = cause ? ` (${String(cause.code ?? cause.message ?? cause)})` : "";
+  return `${String(err?.message ?? e)}${causeText}`;
+}
+
 async function listAll(client: Client): Promise<ToolShape[]> {
   const tools: ToolShape[] = [];
   let cursor: string | undefined;
@@ -59,7 +69,7 @@ export async function fromUrl(url: string, opts: FromUrlOptions = {}): Promise<C
     const tools = await listAll(client);
     return { tools };
   } catch (e) {
-    const msg = String((e as Error).message ?? e);
+    const msg = errorMessage(e);
     if (/401|unauthorized|oauth|authenticat/i.test(msg)) return { authGated: true };
     return { bootError: msg };
   } finally {
@@ -84,7 +94,7 @@ export async function fromNpm(pkg: string, env: Record<string, string>): Promise
     const tools = await listAll(client);
     return { tools };
   } catch (e) {
-    const msg = `${String((e as Error).message ?? e)}${stderrTail ? `\n--- server stderr ---\n${stderrTail}` : ""}`;
+    const msg = `${errorMessage(e)}${stderrTail ? `\n--- server stderr ---\n${stderrTail}` : ""}`;
     if (/api[_ ]?key|token|credential|auth/i.test(msg)) return { authGated: true, bootError: msg };
     return { bootError: msg };
   } finally {

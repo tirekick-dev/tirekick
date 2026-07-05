@@ -1,7 +1,7 @@
 {
   "name": "tirekick",
   "version": "0.0.2",
-  "description": "Kick the tires on MCP servers and agent skills: schema validation, strict-regex lint, and quality checks before you ship or install.",
+  "description": "Kick the tires on MCP servers: schema validation, strict-regex lint, and quality checks before you ship or install.",
   "license": "MIT",
   "homepage": "https://tirekick.dev",
   "repository": {
@@ -17,8 +17,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts src/validate.ts src/connect.ts --format esm --clean",
-    "dev": "tsup src/index.ts src/validate.ts src/connect.ts --format esm --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "test": "npm run build && node --test \"test/*.test.mjs\""
   },
   "keywords": [
@@ -28,7 +28,7 @@
     "validator",
     "lint",
     "json-schema",
-    "agent-skills",
+    "ci",
     "quality"
   ],
   "dependencies": {
