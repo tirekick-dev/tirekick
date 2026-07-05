@@ -1,6 +1,6 @@
 {
   "name": "tirekick",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Kick the tires on MCP servers: schema validation, strict-regex lint, and quality checks before you ship or install.",
   "license": "MIT",
   "homepage": "https://tirekick.dev",
