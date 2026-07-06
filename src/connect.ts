@@ -7,6 +7,8 @@ import { VERSION } from "./version.js";
 
 export interface ConnectResult {
   tools?: ToolShape[];
+  /** The server's self-reported implementation info from initialize. */
+  serverInfo?: { name?: string; title?: string; version?: string };
   /** Set when the server exists but won't hand us tools without credentials. */
   authGated?: boolean;
   /** Set when the process/endpoint failed before tools/list. */
@@ -67,7 +69,7 @@ export async function fromUrl(url: string, opts: FromUrlOptions = {}): Promise<C
   try {
     await withTimeout(client.connect(transport), "initialize");
     const tools = await listAll(client);
-    return { tools };
+    return { tools, serverInfo: client.getServerVersion() };
   } catch (e) {
     const msg = errorMessage(e);
     if (/401|unauthorized|oauth|authenticat/i.test(msg)) return { authGated: true };
