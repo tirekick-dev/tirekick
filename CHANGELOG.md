@@ -1,5 +1,15 @@
 # tirekick
 
+## 0.2.0
+
+### Minor Changes
+
+- [`42bf8e3`](https://github.com/clamp-sh/clamp/commit/42bf8e3d00e65a47ee8c1235aeb9365d3ee86d6b) Thanks [@sbj-o](https://github.com/sbj-o)! - fromUrl now returns the server's self-reported implementation info (name, title, version) from the MCP initialize handshake as `serverInfo`.
+
+### Patch Changes
+
+- [`ddeddaf`](https://github.com/clamp-sh/clamp/commit/ddeddaff62663844787c1ec7c84a3f0dd3997fe1) Thanks [@sbj-o](https://github.com/sbj-o)! - Servers exposing more than 60 tools get an informational `tool-count` finding — oversized toolsets burn agent context and degrade tool selection. Info severity: it never moves the grade.
+
 ## 0.1.0
 
 ### Minor Changes
